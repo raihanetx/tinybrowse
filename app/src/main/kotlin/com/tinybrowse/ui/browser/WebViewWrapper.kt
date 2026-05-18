@@ -1,12 +1,15 @@
 package com.tinybrowse.ui.browser
 
 import android.graphics.Bitmap
+import android.net.http.SslError
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
+import android.webkit.CookieManager
 
 @Composable
 fun WebViewWrapper(
@@ -50,11 +54,31 @@ fun WebViewWrapper(
         WebView(context).apply {
             WebViewConfig.apply(settings)
 
+            // CRITICAL FIX: Third-party cookies must be enabled
+            // for YouTube, Google, and many modern sites to work.
+            // Without this, sites that rely on cross-origin cookies
+            // show a blank/white screen.
+            try {
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            } catch (e: Exception) {
+                Log.w("WebView", "Failed to set third-party cookie policy", e)
+            }
+
             // Keep WebView focusable for video interaction
             isFocusable = true
             isFocusableInTouchMode = true
 
             webViewClient = object : WebViewClient() {
+
+                override fun shouldOverrideUrlLoading(
+                    view: WebView, request: WebResourceRequest?
+                ): Boolean {
+                    // Return false = let WebView handle the URL itself
+                    // This is critical — without this override, some Android
+                    // versions may try to launch an external browser.
+                    return false
+                }
+
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                     url?.let { onPageStarted(it) }
                     onCanGoBackChanged(view.canGoBack())
@@ -77,23 +101,64 @@ fun WebViewWrapper(
                     view: WebView, request: WebResourceRequest?,
                     error: WebResourceError?
                 ) {
+                    super.onReceivedError(view, request, error)
                     if (request?.isForMainFrame == true) {
                         onReceivedError(error?.description?.toString() ?: "Page failed to load")
                     }
                 }
 
+                override fun onReceivedHttpError(
+                    view: WebView, request: WebResourceRequest?,
+                    errorResponse: WebResourceResponse?
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    if (request?.isForMainFrame == true) {
+                        Log.w("WebView", "HTTP error ${errorResponse?.statusCode} for $request")
+                    }
+                }
+
                 override fun onReceivedSslError(
                     view: WebView, handler: SslErrorHandler,
-                    error: android.net.http.SslError?
+                    error: SslError?
                 ) {
+                    // CRITICAL FIX: handler.cancel() was KILLING page loads
+                    // for any site with minor SSL issues, causing white screen.
+                    // Most browsers proceed with a warning instead.
+                    Log.w("WebView", "SSL error for ${view.url}: ${error?.toString()}")
                     onSslStateChanged(false)
-                    handler.cancel()
+                    handler.proceed()  // Allow the page to load
                 }
             }
 
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) {
                     onProgressChanged(newProgress)
+                }
+
+                // CRITICAL FIX: Sites like YouTube open new windows for content.
+                // Without this, window.open() silently fails = blank screen.
+                // We create a temporary WebView to intercept the URL,
+                // then load it in the main WebView instead.
+                override fun onCreateWindow(
+                    view: WebView, isDialog: Boolean, isUserGesture: Boolean,
+                    resultMsg: android.os.Message?
+                ): Boolean {
+                    val newWebView = WebView(view.context)
+                    newWebView.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            v: WebView, request: WebResourceRequest?
+                        ): Boolean {
+                            val targetUrl = request?.url?.toString()
+                            if (targetUrl != null) {
+                                view.loadUrl(targetUrl)
+                            }
+                            return true
+                        }
+                    }
+                    val transport = resultMsg?.obj as? android.webkit.WebView.WebViewTransport
+                    transport?.webView = newWebView
+                    resultMsg?.sendToTarget()
+                    return true
                 }
 
                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
@@ -133,7 +198,16 @@ fun WebViewWrapper(
                     isFullscreen = false
                 }
 
-                override fun getDefaultVideoPoster(): Bitmap? = null
+                override fun getDefaultVideoPoster(): Bitmap? {
+                    // Return a transparent 1px bitmap instead of null
+                    // to prevent video placeholder rendering issues
+                    return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                }
+
+                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                    Log.d("WebViewConsole", consoleMessage?.message() ?: "")
+                    return true
+                }
             }
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->

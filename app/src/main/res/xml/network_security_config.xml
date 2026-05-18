@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext for local dev only -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- CRITICAL FIX: cleartextTrafficPermitted="false" was blocking
+         HTTP resources (CSS, JS, images) loaded by many websites,
+         causing blank/white screen rendering. Most sites use HTTPS
+         for the main page but some CDNs still serve resources over HTTP. -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

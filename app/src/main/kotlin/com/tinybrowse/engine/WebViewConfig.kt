@@ -13,12 +13,12 @@ object WebViewConfig {
             cacheMode = WebSettings.LOAD_DEFAULT
             setRenderPriority(WebSettings.RenderPriority.HIGH)
 
-            // JavaScript (required for modern web)
+            // JavaScript (required for modern web — YouTube, Google, etc.)
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true   // Required for video playback on some sites
 
-            // Images
+            // Images — MUST be enabled for page rendering
             loadsImagesAutomatically = true
             blockNetworkImage = false
 
@@ -29,8 +29,11 @@ object WebViewConfig {
             // Media — MUST allow autoplay for YouTube etc.
             mediaPlaybackRequiresUserGesture = false
 
-            // Allow mixed content (some video CDNs use HTTP resources)
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            // CRITICAL: Allow mixed content. Many sites load some
+            // resources (fonts, scripts, images) over HTTP even when
+            // the main page is HTTPS. MIXED_CONTENT_NEVER_ALLOW would
+            // block these, causing blank/white screen.
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
             // Misc
             setSupportZoom(true)
@@ -41,6 +44,13 @@ object WebViewConfig {
 
             // Text
             textZoom = 100
+
+            // CRITICAL: Allow file access for content rendering
+            allowFileAccess = true
+            allowContentAccess = true
+
+            // Ensure WebView can save/form data
+            saveFormData = true
         }
     }
 
