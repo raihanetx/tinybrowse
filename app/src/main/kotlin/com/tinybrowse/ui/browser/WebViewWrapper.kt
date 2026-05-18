@@ -38,8 +38,7 @@ fun WebViewWrapper(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-
-    var currentLoadedUrl by remember { mutableStateOf("") }
+    var currentDesktopMode by remember { mutableStateOf(isDesktopMode) }
 
     val webView = remember {
         WebView(context).apply {
@@ -53,7 +52,13 @@ fun WebViewWrapper(
                 }
 
                 override fun onPageFinished(view: WebView, url: String?) {
-                    url?.let { onPageFinished(it, view.title ?: "") }
+                    url?.let {
+                        // Inject viewport override JS on every page load
+                        if (currentDesktopMode) {
+                            view.evaluateJavascript(WebViewConfig.DESKTOP_VIEWPORT_JS, null)
+                        }
+                        onPageFinished(it, view.title ?: "")
+                    }
                     onCanGoBackChanged(view.canGoBack())
                     onCanGoForwardChanged(view.canGoForward())
                 }
@@ -90,15 +95,24 @@ fun WebViewWrapper(
         }
     }
 
-    // Apply user-agent based on desktop mode
-    fun applyDesktopModeSettings(wv: WebView, desktopMode: Boolean) {
+    // Apply desktop/mobile WebView settings
+    fun applyDesktopMode(wv: WebView, desktopMode: Boolean) {
+        currentDesktopMode = desktopMode
         wv.settings.userAgentString = if (desktopMode) {
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            WebViewConfig.DESKTOP_USER_AGENT
         } else {
             WebSettings.getDefaultUserAgent(context)
         }
-        wv.settings.useWideViewPort = true  // always true for proper rendering
-        wv.settings.loadWithOverviewMode = desktopMode
+        wv.settings.useWideViewPort = true
+        wv.settings.loadWithOverviewMode = false
+
+        if (desktopMode) {
+            // Desktop: render at 1:1 scale, wide viewport
+            wv.setInitialScale(100)
+        } else {
+            // Mobile: let WebView auto-fit
+            wv.setInitialScale(0)
+        }
     }
 
     // Apply incognito settings
@@ -114,16 +128,17 @@ fun WebViewWrapper(
     // Load URL reactively — always apply user-agent BEFORE loading
     LaunchedEffect(url) {
         if (url.isNotEmpty()) {
-            applyDesktopModeSettings(webView, isDesktopMode)
+            applyDesktopMode(webView, isDesktopMode)
             webView.loadUrl(url)
-            currentLoadedUrl = url
         }
     }
 
-    // When desktop mode is toggled while a page is already loaded, reload it
+    // When desktop mode is toggled while a page is already loaded,
+    // apply settings + inject viewport JS + reload ONCE
     LaunchedEffect(isDesktopMode) {
-        if (currentLoadedUrl.isNotEmpty()) {
-            applyDesktopModeSettings(webView, isDesktopMode)
+        val wvUrl = webView.url
+        if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
+            applyDesktopMode(webView, isDesktopMode)
             webView.reload()
         }
     }

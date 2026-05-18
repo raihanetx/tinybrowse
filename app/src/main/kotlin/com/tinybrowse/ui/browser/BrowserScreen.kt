@@ -1,7 +1,6 @@
 package com.tinybrowse.ui.browser
 
 import android.webkit.CookieManager
-import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,22 +96,9 @@ fun BrowserScreen(
                         Text(if (state.isDesktopMode) "✓ Desktop mode" else "Desktop mode")
                     },
                     onClick = {
-                        val newDesktopMode = !state.isDesktopMode
+                        // Just toggle the ViewModel state — WebViewWrapper's
+                        // LaunchedEffect(isDesktopMode) will apply settings + reload
                         viewModel.toggleDesktopMode()
-
-                        // Apply to WebView immediately and reload
-                        webView?.let { wv ->
-                            wv.settings.userAgentString = if (newDesktopMode) {
-                                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                            } else {
-                                WebSettings.getDefaultUserAgent(context)
-                            }
-                            wv.settings.loadWithOverviewMode = newDesktopMode
-                            // Only reload if there's a page currently loaded
-                            if (wv.url != null && wv.url != "about:blank") {
-                                wv.reload()
-                            }
-                        }
                         showMenu = false
                     }
                 )
