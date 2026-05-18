@@ -161,6 +161,7 @@ fun BrowserScreen(
                 else -> {
                     WebViewWrapper(
                         url = state.currentUrl,
+                        navigationId = state.navigationId,
                         isDesktopMode = state.isDesktopMode,
                         isIncognito = state.tabs.getOrNull(state.activeTabIndex)?.isIncognito == true,
                         onPageStarted = { viewModel.onPageStarted(it) },

@@ -36,6 +36,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val savedSites: List<SavedSite> = emptyList(),
         val error: String? = null,
         val isCurrentSiteSaved: Boolean = false,
+        /**
+         * Incremented ONLY on user-initiated navigation.
+         * WebViewWrapper uses this to know when to call loadUrl().
+         * Internal WebView navigation (redirects, link clicks) updates
+         * currentUrl but does NOT increment this, preventing the
+         * reload feedback loop that causes white screens.
+         */
+        val navigationId: Int = 0,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -55,7 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(isDesktopMode = prefs.isDesktopMode) }
     }
 
-    // --- Navigation ---
+    // --- Navigation (user-initiated) ---
 
     fun loadUrl(url: String) {
         val finalUrl = UrlUtils.parseInput(url)
@@ -67,7 +75,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = true,
                 pageProgress = 0,
                 error = null,
-                showStartPage = false
+                showStartPage = false,
+                navigationId = it.navigationId + 1  // Signal WebView to load
             )
         }
 
@@ -93,6 +102,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Page callbacks (called from WebViewClient) ---
+    // These do NOT increment navigationId — they just update display state.
+    // The WebView is already handling the navigation internally.
 
     fun onPageStarted(url: String) {
         _state.update {
@@ -102,6 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pageProgress = 0,
                 error = null,
                 showStartPage = false
+                // NOT incrementing navigationId — WebView is already loading
             )
         }
         checkIfSaved(url)
@@ -178,7 +190,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 showStartPage = tab.url == "start",
                 isLoading = false,
                 pageProgress = 0,
-                error = null
+                error = null,
+                navigationId = it.navigationId + 1  // Signal WebView to load tab URL
             )
         }
     }
@@ -214,7 +227,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentTitle = activeTab.title,
                 showStartPage = activeTab.url == "start",
                 isLoading = false,
-                error = null
+                error = null,
+                navigationId = it.navigationId + 1  // Signal WebView to load
             )
         }
     }

@@ -10,7 +10,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import com.tinybrowse.engine.WebViewConfig
 @Composable
 fun WebViewWrapper(
     url: String,
+    navigationId: Int,
     isDesktopMode: Boolean,
     isIncognito: Boolean,
     onPageStarted: (String) -> Unit,
@@ -96,12 +96,7 @@ fun WebViewWrapper(
                     onProgressChanged(newProgress)
                 }
 
-                // === Fullscreen video support ===
-                // YouTube and other sites request fullscreen via this callback.
-                // Without it, videos show as black or don't play at all.
-
                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                    // If already in fullscreen, hide previous
                     if (fullscreenView != null) {
                         onHideCustomView()
                     }
@@ -110,7 +105,6 @@ fun WebViewWrapper(
                     customViewCallback = callback
                     isFullscreen = true
 
-                    // Make the custom view fill the screen
                     view?.let { v ->
                         (this@apply.parent as? ViewGroup)?.let { parent ->
                             parent.removeView(this@apply)
@@ -139,10 +133,7 @@ fun WebViewWrapper(
                     isFullscreen = false
                 }
 
-                // Required for YouTube HTML5 video
-                override fun getDefaultVideoPoster(): Bitmap? {
-                    return null
-                }
+                override fun getDefaultVideoPoster(): Bitmap? = null
             }
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
@@ -180,8 +171,13 @@ fun WebViewWrapper(
         }
     }
 
-    // Load URL reactively — always apply user-agent BEFORE loading
-    LaunchedEffect(url) {
+    // === KEY FIX: Only load URL when navigationId changes ===
+    // navigationId is incremented ONLY by user-initiated actions
+    // (typing URL, switching tabs, closing tabs).
+    // Internal WebView navigation (redirects, link clicks) updates
+    // currentUrl but does NOT increment navigationId, so this
+    // LaunchedEffect won't fire and won't cancel the in-progress load.
+    LaunchedEffect(navigationId) {
         if (url.isNotEmpty()) {
             applyDesktopMode(webView, isDesktopMode)
             webView.loadUrl(url)
