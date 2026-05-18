@@ -147,6 +147,7 @@ fun BrowserScreen(
                 navigationId = state.navigationId,
                 isDesktopMode = state.isDesktopMode,
                 isIncognito = state.tabs.getOrNull(state.activeTabIndex)?.isIncognito == true,
+                isVisible = !state.showStartPage && state.error == null,
                 onPageStarted = { viewModel.onPageStarted(it) },
                 onPageFinished = { url, title -> viewModel.onPageFinished(url, title) },
                 onProgressChanged = { viewModel.onProgressChanged(it) },

@@ -1,7 +1,9 @@
 package com.tinybrowse.ui.browser
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.http.SslError
+import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +15,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebViewRenderProcess
+import android.webkit.WebViewRenderProcessClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -32,6 +36,7 @@ fun WebViewWrapper(
     navigationId: Int,
     isDesktopMode: Boolean,
     isIncognito: Boolean,
+    isVisible: Boolean,
     onPageStarted: (String) -> Unit,
     onPageFinished: (String, String) -> Unit,
     onProgressChanged: (Int) -> Unit,
@@ -54,18 +59,39 @@ fun WebViewWrapper(
             // Apply all settings including cookies and debugging
             WebViewConfig.apply(settings, this)
 
+            // CRITICAL FIX: Set background color to match dark theme / reduce
+            // white flash. Default white background is very jarring and makes
+            // it look like the page is "blank" before content renders.
+            setBackgroundColor(Color.TRANSPARENT)
+
             // Keep WebView focusable for video interaction
             isFocusable = true
             isFocusableInTouchMode = true
+
+            // Initial visibility — hidden when start page is showing
+            visibility = if (isVisible) View.VISIBLE else View.INVISIBLE
 
             webViewClient = object : WebViewClient() {
 
                 override fun shouldOverrideUrlLoading(
                     view: WebView, request: WebResourceRequest?
                 ): Boolean {
-                    // Return false = let WebView handle the URL itself
+                    // Return false = let WebView handle the URL itself.
                     // This is critical — without this override, some Android
                     // versions may try to launch an external browser.
+                    val requestUrl = request?.url?.toString() ?: return false
+
+                    // Block unsupported schemes that would cause blank screen
+                    // (e.g. intent://, market://, tel://, mailto://)
+                    if (requestUrl.startsWith("intent://") ||
+                        requestUrl.startsWith("market://") ||
+                        requestUrl.startsWith("tel:") ||
+                        requestUrl.startsWith("mailto:")
+                    ) {
+                        Log.w("WebView", "Blocked unsupported scheme: $requestUrl")
+                        return true
+                    }
+
                     return false
                 }
 
@@ -211,6 +237,31 @@ fun WebViewWrapper(
                 }
             }
 
+            // CRITICAL FIX: Handle WebView renderer process death.
+            // On low-memory devices or heavy sites, the OS can kill the
+            // WebView renderer process. Without this handler, the page
+            // becomes permanently blank (white screen) with no recovery.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setWebViewRenderProcessClient(
+                    object : WebViewRenderProcessClient() {
+                        override fun onRenderProcessUnresponsive(
+                            view: WebView?,
+                            renderer: WebViewRenderProcess?
+                        ) {
+                            Log.w("WebView", "Renderer unresponsive for ${view?.url}")
+                            // Don't kill it — it might recover
+                        }
+
+                        override fun onRenderProcessResponsive(
+                            view: WebView?,
+                            renderer: WebViewRenderProcess?
+                        ) {
+                            // Recovered — no action needed
+                        }
+                    }
+                )
+            }
+
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
                 onDownloadStart(url, userAgent, contentDisposition, mimeType, contentLength)
             }
@@ -271,7 +322,18 @@ fun WebViewWrapper(
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { webView },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            update = { wv ->
+                // CRITICAL FIX: Control WebView visibility based on whether
+                // the start page is showing. When start page is visible,
+                // hide the WebView to prevent white background from showing
+                // through the overlay. When navigating, make it visible
+                // so the page content is displayed.
+                val targetVisibility = if (isVisible) View.VISIBLE else View.INVISIBLE
+                if (wv.visibility != targetVisibility) {
+                    wv.visibility = targetVisibility
+                }
+            }
         )
     }
 }

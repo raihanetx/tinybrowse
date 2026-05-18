@@ -5,6 +5,18 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 
+# CRITICAL: Keep WebView client subclasses. If R8 strips these,
+# the WebView will have no client callbacks, causing blank/white screen
+# because onPageStarted/onPageFinished/onReceivedError etc. won't fire.
+-keep class * extends android.webkit.WebViewClient { *; }
+-keep class * extends android.webkit.WebChromeClient { *; }
+-keep class * extends android.webkit.WebViewRenderProcessClient { *; }
+
+# Keep WebView settings methods accessed via reflection
+-keep class android.webkit.WebSettings { *; }
+-keep class android.webkit.CookieManager { *; }
+-keep class android.webkit.WebView { *; }
+
 # Keep Compose
 -dontwarn androidx.compose.**
 
