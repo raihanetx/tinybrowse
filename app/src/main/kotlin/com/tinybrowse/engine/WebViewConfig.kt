@@ -16,27 +16,28 @@ object WebViewConfig {
             // JavaScript (required for modern web)
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = false
+            databaseEnabled = true   // Required for video playback on some sites
 
             // Images
             loadsImagesAutomatically = true
             blockNetworkImage = false
 
-            // Viewport — useWideViewPort=true + loadWithOverviewMode=false
-            // gives us a wide desktop-like viewport that doesn't shrink to fit.
-            // This is the correct default for a browser.
+            // Viewport
             useWideViewPort = true
             loadWithOverviewMode = false
 
-            // Media
-            mediaPlaybackRequiresUserGesture = true
+            // Media — MUST allow autoplay for YouTube etc.
+            mediaPlaybackRequiresUserGesture = false
+
+            // Allow mixed content (some video CDNs use HTTP resources)
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
             // Misc
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            setSupportMultipleWindows(false)
-            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(true)  // YouTube opens video in new window
+            javaScriptCanOpenWindowsAutomatically = true
 
             // Text
             textZoom = 100
