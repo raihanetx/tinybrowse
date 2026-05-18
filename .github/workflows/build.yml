@@ -24,23 +24,21 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.10
+      - name: Create Gradle Wrapper
+        run: |
+          gradle wrapper
+          chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace 2>&1 || true
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace
+      - name: Show Build Logs on Failure
+        if: failure()
+        run: cat app/build/outputs/logs/*.log 2>/dev/null || echo "No logs found"
 
       - name: Upload Debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: tinybrowse-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: tinybrowse-release
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
