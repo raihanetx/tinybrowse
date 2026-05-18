@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -35,6 +38,8 @@ fun WebViewWrapper(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    var currentLoadedUrl by remember { mutableStateOf("") }
 
     val webView = remember {
         WebView(context).apply {
@@ -85,21 +90,15 @@ fun WebViewWrapper(
         }
     }
 
-    // Load URL reactively when url state changes
-    LaunchedEffect(url) {
-        if (url.isNotEmpty()) {
-            webView.loadUrl(url)
-        }
-    }
-
-    // Apply desktop mode reactively
-    LaunchedEffect(isDesktopMode) {
-        webView.settings.userAgentString = if (isDesktopMode) {
-            "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0"
+    // Apply user-agent based on desktop mode
+    fun applyDesktopModeSettings(wv: WebView, desktopMode: Boolean) {
+        wv.settings.userAgentString = if (desktopMode) {
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         } else {
             WebSettings.getDefaultUserAgent(context)
         }
-        webView.settings.useWideViewPort = isDesktopMode
+        wv.settings.useWideViewPort = true  // always true for proper rendering
+        wv.settings.loadWithOverviewMode = desktopMode
     }
 
     // Apply incognito settings
@@ -109,6 +108,23 @@ fun WebViewWrapper(
             webView.settings.databaseEnabled = false
         } else {
             webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        }
+    }
+
+    // Load URL reactively — always apply user-agent BEFORE loading
+    LaunchedEffect(url) {
+        if (url.isNotEmpty()) {
+            applyDesktopModeSettings(webView, isDesktopMode)
+            webView.loadUrl(url)
+            currentLoadedUrl = url
+        }
+    }
+
+    // When desktop mode is toggled while a page is already loaded, reload it
+    LaunchedEffect(isDesktopMode) {
+        if (currentLoadedUrl.isNotEmpty()) {
+            applyDesktopModeSettings(webView, isDesktopMode)
+            webView.reload()
         }
     }
 
