@@ -1,13 +1,19 @@
 package com.tinybrowse.engine
 
+import android.webkit.CookieManager
 import android.webkit.WebSettings
+import android.webkit.WebView
 
 /**
  * Static WebView configuration. Applied once when WebView is created.
  */
 object WebViewConfig {
 
-    fun apply(settings: WebSettings) {
+    /**
+     * Apply WebView settings and cookie configuration.
+     * Called once when the WebView is created.
+     */
+    fun apply(settings: WebSettings, webView: WebView? = null) {
         settings.apply {
             // Performance
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -52,6 +58,21 @@ object WebViewConfig {
             // Ensure WebView can save/form data
             saveFormData = true
         }
+
+        // CRITICAL: Must accept cookies globally AND third-party cookies
+        // for sites like YouTube, Google, Facebook to function.
+        // Without these, sites redirect endlessly or show blank screen.
+        webView?.let {
+            try {
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(it, true)
+            } catch (e: Exception) {
+                // Non-fatal — some WebView implementations may not support this
+            }
+        }
+
+        // Enable WebView debugging for development (shows in chrome://inspect)
+        WebView.setWebContentsDebuggingEnabled(true)
     }
 
     /**

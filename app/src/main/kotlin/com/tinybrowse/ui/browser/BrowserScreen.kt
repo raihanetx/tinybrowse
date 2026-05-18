@@ -134,51 +134,53 @@ fun BrowserScreen(
         }
 
         // Content area
+        // CRITICAL FIX: WebViewWrapper must ALWAYS stay in the composition tree.
+        // Previously, it was inside a `when` block and would leave the composition
+        // when showStartPage=true or error!=null, which DESTROYED the WebView.
+        // When WebViewWrapper re-entered composition, a NEW WebView was created,
+        // showing a blank white screen because it had no loaded page.
+        // Now we keep WebViewWrapper always composed, and overlay start/error pages.
         Box(modifier = Modifier.weight(1f)) {
-            when {
-                // Show start page
-                state.showStartPage -> {
-                    StartPage(
-                        savedSites = state.savedSites,
-                        onSearch = { viewModel.search(it) },
-                        onSiteClick = { viewModel.loadUrl(it.url) },
-                        onSiteLongClick = { viewModel.deleteSavedSite(it.id) }
+            // WebView is ALWAYS in the composition — never recreated
+            WebViewWrapper(
+                url = state.currentUrl,
+                navigationId = state.navigationId,
+                isDesktopMode = state.isDesktopMode,
+                isIncognito = state.tabs.getOrNull(state.activeTabIndex)?.isIncognito == true,
+                onPageStarted = { viewModel.onPageStarted(it) },
+                onPageFinished = { url, title -> viewModel.onPageFinished(url, title) },
+                onProgressChanged = { viewModel.onProgressChanged(it) },
+                onReceivedError = { viewModel.onReceivedError(it) },
+                onSslStateChanged = { viewModel.onSslStateChanged(it) },
+                onCanGoBackChanged = { viewModel.onCanGoBackChanged(it) },
+                onCanGoForwardChanged = { viewModel.onCanGoForwardChanged(it) },
+                onDownloadStart = { url, ua, disposition, mime, size ->
+                    com.tinybrowse.engine.DownloadHandler.onDownloadStart(
+                        context, url, ua, disposition, mime, size
                     )
-                }
+                },
+                webViewRef = { webView = it }
+            )
 
-                // Show error page
-                state.error != null -> {
-                    ErrorPage(
-                        errorMessage = state.error ?: "",
-                        onRetry = {
-                            viewModel.clearError()
-                            webView?.reload()
-                        }
-                    )
-                }
+            // Overlay start page on top of WebView (WebView stays alive underneath)
+            if (state.showStartPage) {
+                StartPage(
+                    savedSites = state.savedSites,
+                    onSearch = { viewModel.search(it) },
+                    onSiteClick = { viewModel.loadUrl(it.url) },
+                    onSiteLongClick = { viewModel.deleteSavedSite(it.id) }
+                )
+            }
 
-                // Show WebView
-                else -> {
-                    WebViewWrapper(
-                        url = state.currentUrl,
-                        navigationId = state.navigationId,
-                        isDesktopMode = state.isDesktopMode,
-                        isIncognito = state.tabs.getOrNull(state.activeTabIndex)?.isIncognito == true,
-                        onPageStarted = { viewModel.onPageStarted(it) },
-                        onPageFinished = { url, title -> viewModel.onPageFinished(url, title) },
-                        onProgressChanged = { viewModel.onProgressChanged(it) },
-                        onReceivedError = { viewModel.onReceivedError(it) },
-                        onSslStateChanged = { viewModel.onSslStateChanged(it) },
-                        onCanGoBackChanged = { viewModel.onCanGoBackChanged(it) },
-                        onCanGoForwardChanged = { viewModel.onCanGoForwardChanged(it) },
-                        onDownloadStart = { url, ua, disposition, mime, size ->
-                            com.tinybrowse.engine.DownloadHandler.onDownloadStart(
-                                context, url, ua, disposition, mime, size
-                            )
-                        },
-                        webViewRef = { webView = it }
-                    )
-                }
+            // Overlay error page on top of WebView
+            if (!state.showStartPage && state.error != null) {
+                ErrorPage(
+                    errorMessage = state.error ?: "",
+                    onRetry = {
+                        viewModel.clearError()
+                        webView?.reload()
+                    }
+                )
             }
         }
     }

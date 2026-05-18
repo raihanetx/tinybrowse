@@ -25,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
-import android.webkit.CookieManager
 
 @Composable
 fun WebViewWrapper(
@@ -52,17 +51,8 @@ fun WebViewWrapper(
 
     val webView = remember {
         WebView(context).apply {
-            WebViewConfig.apply(settings)
-
-            // CRITICAL FIX: Third-party cookies must be enabled
-            // for YouTube, Google, and many modern sites to work.
-            // Without this, sites that rely on cross-origin cookies
-            // show a blank/white screen.
-            try {
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            } catch (e: Exception) {
-                Log.w("WebView", "Failed to set third-party cookie policy", e)
-            }
+            // Apply all settings including cookies and debugging
+            WebViewConfig.apply(settings, this)
 
             // Keep WebView focusable for video interaction
             isFocusable = true
@@ -143,21 +133,32 @@ fun WebViewWrapper(
                     view: WebView, isDialog: Boolean, isUserGesture: Boolean,
                     resultMsg: android.os.Message?
                 ): Boolean {
-                    val newWebView = WebView(view.context)
-                    newWebView.webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            v: WebView, request: WebResourceRequest?
-                        ): Boolean {
-                            val targetUrl = request?.url?.toString()
-                            if (targetUrl != null) {
-                                view.loadUrl(targetUrl)
+                    try {
+                        val newWebView = WebView(view.context)
+                        newWebView.settings.javaScriptEnabled = true
+                        newWebView.settings.domStorageEnabled = true
+                        newWebView.webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                v: WebView, request: WebResourceRequest?
+                            ): Boolean {
+                                val targetUrl = request?.url?.toString()
+                                if (targetUrl != null) {
+                                    view.loadUrl(targetUrl)
+                                }
+                                return true
                             }
-                            return true
                         }
+                        val transport = resultMsg?.obj as? android.webkit.WebView.WebViewTransport
+                        if (transport != null) {
+                            transport.webView = newWebView
+                            resultMsg?.sendToTarget()
+                        } else {
+                            // Fallback: just notify the message
+                            resultMsg?.sendToTarget()
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WebView", "onCreateWindow failed", e)
                     }
-                    val transport = resultMsg?.obj as? android.webkit.WebView.WebViewTransport
-                    transport?.webView = newWebView
-                    resultMsg?.sendToTarget()
                     return true
                 }
 
