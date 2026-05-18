@@ -3,7 +3,6 @@ package com.tinybrowse.ui.browser
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.http.SslError
-import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -15,8 +14,6 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.webkit.WebViewRenderProcess
-import android.webkit.WebViewRenderProcessClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -144,6 +141,20 @@ fun WebViewWrapper(
                     onSslStateChanged(false)
                     handler.proceed()  // Allow the page to load
                 }
+
+                override fun onRenderProcessGone(
+                    view: WebView, detail: android.webkit.RenderProcessGoneDetail?
+                ): Boolean {
+                    // CRITICAL FIX: When the WebView renderer process crashes
+                    // (OOM, GPU error, etc.), the page becomes permanently blank.
+                    // Return true to indicate we handled it, and reload the page.
+                    Log.e("WebView", "Render process gone for ${view.url}, crashing=${detail?.didCrash()}")
+                    if (view.url != null && view.url != "about:blank") {
+                        // Post a reload to give the system time to recover
+                        view.postDelayed({ view.reload() }, 500)
+                    }
+                    return true
+                }
             }
 
             webChromeClient = object : WebChromeClient() {
@@ -241,31 +252,9 @@ fun WebViewWrapper(
             // On low-memory devices or heavy sites, the OS can kill the
             // WebView renderer process. Without this handler, the page
             // becomes permanently blank (white screen) with no recovery.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                try {
-                    setWebViewRenderProcessClient(
-                        java.util.concurrent.Executors.newSingleThreadExecutor(),
-                        object : WebViewRenderProcessClient() {
-                            override fun onRenderProcessUnresponsive(
-                                view: WebView,
-                                renderer: WebViewRenderProcess
-                            ) {
-                                Log.w("WebView", "Renderer unresponsive for ${view.url}")
-                                // Don't kill it — it might recover
-                            }
-
-                            override fun onRenderProcessResponsive(
-                                view: WebView,
-                                renderer: WebViewRenderProcess
-                            ) {
-                                // Recovered — no action needed
-                            }
-                        }
-                    )
-                } catch (e: Exception) {
-                    Log.w("WebView", "Failed to set render process client", e)
-                }
-            }
+            // We use onRenderProcessGone in WebViewClient (API 26+) instead
+            // of WebViewRenderProcessClient which has API compatibility issues.
+            // The handler is set in the WebViewClient below.
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
                 onDownloadStart(url, userAgent, contentDisposition, mimeType, contentLength)
