@@ -28,21 +28,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
 
 /**
- * WebViewWrapper — COMPLETELY REWRITTEN for v1.0.7
+ * WebViewWrapper — v1.0.8
  *
- * Previous versions (v1.0.0–v1.0.6) tried to "fix" the white screen by
- * hiding the WebView with INVISIBLE/GONE states, using hasPageStartedLoading
- * flags, and other visibility tricks. This was WRONG — it caused the WebView
- * to never show up on some devices because the flag/state got out of sync.
- *
- * The correct approach: The WebView is ALWAYS VISIBLE. Always. No exceptions.
- * StartPage and ErrorPage are opaque Compose overlays drawn ON TOP of it.
- * The WebView is never hidden, never gone, never set to INVISIBLE.
- * It just works — like every other Android browser.
- *
- * For sites that show white: the issue was likely the WebView User-Agent
- * identifying itself as a WebView, causing some sites to serve blank pages.
- * Now we use a mobile Chrome UA that doesn't reveal it's a WebView.
+ * Architecture:
+ * - WebView is ALWAYS VISIBLE. No visibility hacks.
+ * - StartPage and ErrorPage are opaque Compose overlays drawn ON TOP.
+ * - Uses Chrome Mobile User-Agent (NOT default WebView UA which contains "wv")
+ *   so websites don't serve blank/degraded pages.
  */
 @Composable
 fun WebViewWrapper(
@@ -81,26 +73,20 @@ fun WebViewWrapper(
                     view: WebView, request: WebResourceRequest?
                 ): Boolean {
                     val requestUrl = request?.url?.toString() ?: return false
-
-                    // Only block truly unsupported schemes
-                    // DO NOT block http/https — let WebView handle all web navigation
-                    val scheme = request?.url?.scheme ?: return false
+                    val scheme = request.url?.scheme ?: return false
                     when (scheme) {
-                        "http", "https" -> return false  // Always allow web URLs
-                        "intent" -> {
-                            Log.w("WebView", "Blocked intent:// scheme: $requestUrl")
-                            return true
-                        }
-                        "market" -> {
-                            Log.w("WebView", "Blocked market:// scheme: $requestUrl")
+                        "http", "https" -> return false
+                        "intent", "market" -> {
+                            Log.w("WebView", "Blocked scheme: $requestUrl")
                             return true
                         }
                     }
-                    // Let other schemes through or block as needed
                     return false
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                    // Reset secure state on each new page load
+                    onSslStateChanged(true)
                     url?.let { onPageStarted(it) }
                     onCanGoBackChanged(view.canGoBack())
                     onCanGoForwardChanged(view.canGoForward())
@@ -133,7 +119,7 @@ fun WebViewWrapper(
                 ) {
                     super.onReceivedHttpError(view, request, errorResponse)
                     if (request?.isForMainFrame == true) {
-                        Log.w("WebView", "HTTP error ${errorResponse?.statusCode} for $request")
+                        Log.w("WebView", "HTTP error ${errorResponse?.statusCode}")
                     }
                 }
 
@@ -141,7 +127,7 @@ fun WebViewWrapper(
                     view: WebView, handler: SslErrorHandler,
                     error: SslError?
                 ) {
-                    Log.w("WebView", "SSL error for ${view.url}: ${error?.toString()}")
+                    Log.w("WebView", "SSL error for ${view.url}: ${error}")
                     onSslStateChanged(false)
                     handler.proceed()
                 }
@@ -249,9 +235,6 @@ fun WebViewWrapper(
         onDispose {
             try {
                 webView.stopLoading()
-                webView.settings.javaScriptEnabled = false
-                webView.loadUrl("about:blank")
-                webView.freeMemory()
                 webView.destroy()
             } catch (_: Exception) {}
         }
@@ -302,14 +285,12 @@ fun WebViewWrapper(
         }
     }
 
-    // THE KEY CHANGE: WebView is ALWAYS VISIBLE. No visibility tricks.
+    // WebView is ALWAYS VISIBLE. No visibility tricks.
     // StartPage and ErrorPage are opaque Compose overlays drawn on top.
-    // This eliminates ALL the state-sync bugs that caused white screens.
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { webView },
             modifier = Modifier.fillMaxSize()
-            // NO update block needed — we never change WebView visibility
         )
     }
 }

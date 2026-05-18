@@ -61,6 +61,7 @@ object WebViewConfig {
             // === USER AGENT ===
             // Set mobile Chrome UA by default — this is THE KEY FIX for
             // sites that show blank/white screen in WebView browsers.
+            // The default WebView UA contains "wv" which sites detect.
             userAgentString = MOBILE_USER_AGENT
 
             // === WINDOWS / POPUPS ===
@@ -81,10 +82,6 @@ object WebViewConfig {
 
             // === FORM DATA ===
             saveFormData = true
-
-            // === SCROLLBAR ===
-            // Don't fade out scrollbars — helps with usability
-            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
         }
 
         // === COOKIES — must accept all cookies for sites to function ===

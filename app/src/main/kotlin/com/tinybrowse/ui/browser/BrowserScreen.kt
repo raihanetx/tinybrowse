@@ -1,6 +1,5 @@
 package com.tinybrowse.ui.browser
 
-import android.webkit.CookieManager
 import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
