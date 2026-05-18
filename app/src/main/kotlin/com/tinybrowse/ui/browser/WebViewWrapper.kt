@@ -29,16 +29,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
 
 /**
- * WebViewWrapper — v1.0.9
+ * WebViewWrapper — v1.1.1
  *
  * Architecture:
  * - WebView is ALWAYS VISIBLE. No visibility hacks.
  * - StartPage and ErrorPage are opaque Compose overlays drawn ON TOP.
  * - Uses Chrome Mobile User-Agent (NOT default WebView UA which contains "wv")
  *   so websites don't serve blank/degraded pages.
- * - Desktop mode: uses loadWithOverviewMode=true + setInitialScale(0) to
- *   auto-fit desktop content. NEVER use setInitialScale(100) — it renders
- *   desktop content off-screen on phone-sized viewports = BLANK WHITE PAGE.
+ * - Desktop mode: useWideViewPort=true + loadWithOverviewMode=true lets
+ *   WebView auto-fit desktop content. NO JavaScript viewport injection —
+ *   injecting viewport JS AFTER the page renders causes re-layout which
+ *   breaks many websites = WHITE SCREEN.
  */
 @Composable
 fun WebViewWrapper(
@@ -105,9 +106,14 @@ fun WebViewWrapper(
 
                 override fun onPageFinished(view: WebView, url: String?) {
                     url?.let {
-                        if (currentDesktopMode) {
-                            view.evaluateJavascript(WebViewConfig.DESKTOP_VIEWPORT_JS, null)
-                        }
+                        // DO NOT inject viewport JavaScript here!
+                        // Injecting viewport JS after the page has already rendered
+                        // forces a complete re-layout. Many websites break during
+                        // re-layout — content goes off-screen, CSS positioning fails,
+                        // or the entire page goes blank/white. Instead, we rely on
+                        // WebView's built-in settings (useWideViewPort +
+                        // loadWithOverviewMode) which handle the viewport correctly
+                        // BEFORE the page renders.
                         onPageFinished(it, view.title ?: "")
                     }
                     onCanGoBackChanged(view.canGoBack())
@@ -328,15 +334,18 @@ fun WebViewWrapper(
             val wvUrl = webView.url
             if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
                 applyDesktopMode(webView, isDesktopMode)
-                // Use loadUrl() instead of reload() to force a FRESH page load.
-                // reload() may serve cached resources (CSS/JS/images) that were
-                // fetched with the old UA (mobile), which can be DIFFERENT from
-                // what the desktop version expects. loadUrl() ensures the server
-                // re-evaluates the request with the new desktop UA.
+                // Clear the cache so the server gets a FRESH request with the
+                // new UA. Without this, reload() may serve cached resources
+                // (CSS/JS/images) that were fetched with the old UA (mobile),
+                // which can be DIFFERENT from what the desktop version expects.
+                // Using reload() instead of loadUrl() because loadUrl() on an
+                // already-loaded URL can cause double-navigation issues on
+                // some websites (SPA redirects, history manipulation, etc.).
+                webView.clearCache(true)
                 try {
-                    webView.loadUrl(wvUrl)
+                    webView.reload()
                 } catch (e: Exception) {
-                    Log.e("WebView", "loadUrl failed on desktop mode toggle: $wvUrl", e)
+                    Log.e("WebView", "reload failed on desktop mode toggle", e)
                 }
             }
         }
