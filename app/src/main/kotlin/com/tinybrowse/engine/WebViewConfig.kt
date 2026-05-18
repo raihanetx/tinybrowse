@@ -10,76 +10,97 @@ import android.webkit.WebView
 object WebViewConfig {
 
     /**
+     * Mobile Chrome User-Agent — does NOT identify as a WebView.
+     *
+     * CRITICAL: The default Android WebView UA contains "wv" or "Version/4.0"
+     * which many websites detect as a WebView browser. Sites like Facebook,
+     * Instagram, Twitter, banking sites, and many others serve BLANK or
+     * degraded pages to WebView UAs. By using a standard Chrome Mobile UA,
+     * these sites serve their full content like they would to Chrome.
+     */
+    const val MOBILE_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Mobile Safari/537.36"
+
+    /**
+     * Desktop Chrome User-Agent — full Chrome on Linux for desktop mode.
+     */
+    const val DESKTOP_USER_AGENT =
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36"
+
+    /**
      * Apply WebView settings and cookie configuration.
      * Called once when the WebView is created.
      */
     fun apply(settings: WebSettings, webView: WebView? = null) {
         settings.apply {
-            // Performance
+            // === PERFORMANCE ===
             cacheMode = WebSettings.LOAD_DEFAULT
             setRenderPriority(WebSettings.RenderPriority.HIGH)
 
-            // JavaScript (required for modern web — YouTube, Google, etc.)
+            // === JAVASCRIPT — required for ALL modern websites ===
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true   // Required for video playback on some sites
+            databaseEnabled = true
 
-            // Images — MUST be enabled for page rendering
+            // === IMAGES — must be enabled for page rendering ===
             loadsImagesAutomatically = true
             blockNetworkImage = false
 
-            // Viewport
+            // === VIEWPORT ===
             useWideViewPort = true
             loadWithOverviewMode = false
 
-            // Media — MUST allow autoplay for YouTube etc.
+            // === MEDIA — allow autoplay for YouTube, video sites ===
             mediaPlaybackRequiresUserGesture = false
 
-            // CRITICAL: Allow mixed content. Many sites load some
-            // resources (fonts, scripts, images) over HTTP even when
-            // the main page is HTTPS. MIXED_CONTENT_NEVER_ALLOW would
-            // block these, causing blank/white screen.
+            // === MIXED CONTENT — allow HTTP resources on HTTPS pages ===
+            // Many CDNs serve fonts/scripts/images over HTTP even when
+            // the main page is HTTPS. Blocking these = blank page.
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-            // Misc
+            // === USER AGENT ===
+            // Set mobile Chrome UA by default — this is THE KEY FIX for
+            // sites that show blank/white screen in WebView browsers.
+            userAgentString = MOBILE_USER_AGENT
+
+            // === WINDOWS / POPUPS ===
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
+
+            // === ZOOM ===
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            setSupportMultipleWindows(true)  // YouTube opens video in new window
-            javaScriptCanOpenWindowsAutomatically = true
 
-            // Text
+            // === TEXT ===
             textZoom = 100
 
-            // CRITICAL: Allow file access for content rendering
+            // === FILE ACCESS ===
             allowFileAccess = true
             allowContentAccess = true
 
-            // Ensure WebView can save/form data
+            // === FORM DATA ===
             saveFormData = true
+
+            // === SCROLLBAR ===
+            // Don't fade out scrollbars — helps with usability
+            scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
         }
 
-        // CRITICAL: Must accept cookies globally AND third-party cookies
-        // for sites like YouTube, Google, Facebook to function.
-        // Without these, sites redirect endlessly or show blank screen.
+        // === COOKIES — must accept all cookies for sites to function ===
         webView?.let {
             try {
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(it, true)
+                val cookieManager = CookieManager.getInstance()
+                cookieManager.setAcceptCookie(true)
+                cookieManager.setAcceptThirdPartyCookies(it, true)
             } catch (e: Exception) {
-                // Non-fatal — some WebView implementations may not support this
+                // Non-fatal on some WebView implementations
             }
         }
 
-        // Enable WebView debugging for development (shows in chrome://inspect)
+        // Enable WebView debugging
         WebView.setWebContentsDebuggingEnabled(true)
     }
-
-    /**
-     * Desktop user-agent string — full Chrome on Linux.
-     */
-    const val DESKTOP_USER_AGENT =
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     /**
      * JavaScript to inject into every page to override viewport meta tag.
@@ -95,18 +116,6 @@ object WebViewConfig {
                 meta.name = 'viewport';
                 meta.content = 'width=1024, initial-scale=1';
                 document.head.appendChild(meta);
-            }
-        })();
-    """
-
-    /**
-     * JavaScript to restore mobile viewport.
-     */
-    const val MOBILE_VIEWPORT_JS = """
-        (function() {
-            var meta = document.querySelector('meta[name="viewport"]');
-            if (meta) {
-                meta.setAttribute('content', 'width=device-width, initial-scale=1');
             }
         })();
     """

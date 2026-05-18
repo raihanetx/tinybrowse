@@ -1,7 +1,6 @@
 package com.tinybrowse.ui.browser
 
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.net.http.SslError
 import android.util.Log
 import android.view.View
@@ -27,8 +26,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
-import kotlinx.coroutines.delay
 
+/**
+ * WebViewWrapper — COMPLETELY REWRITTEN for v1.0.7
+ *
+ * Previous versions (v1.0.0–v1.0.6) tried to "fix" the white screen by
+ * hiding the WebView with INVISIBLE/GONE states, using hasPageStartedLoading
+ * flags, and other visibility tricks. This was WRONG — it caused the WebView
+ * to never show up on some devices because the flag/state got out of sync.
+ *
+ * The correct approach: The WebView is ALWAYS VISIBLE. Always. No exceptions.
+ * StartPage and ErrorPage are opaque Compose overlays drawn ON TOP of it.
+ * The WebView is never hidden, never gone, never set to INVISIBLE.
+ * It just works — like every other Android browser.
+ *
+ * For sites that show white: the issue was likely the WebView User-Agent
+ * identifying itself as a WebView, causing some sites to serve blank pages.
+ * Now we use a mobile Chrome UA that doesn't reveal it's a WebView.
+ */
 @Composable
 fun WebViewWrapper(
     url: String,
@@ -50,26 +65,15 @@ fun WebViewWrapper(
 ) {
     val context = LocalContext.current
     var currentDesktopMode by remember { mutableStateOf(isDesktopMode) }
+    var lastLoadedNavId by remember { mutableStateOf(-1) }
     var isFullscreen by remember { mutableStateOf(false) }
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
-    // Track last loaded navigationId to avoid duplicate loads
-    var lastLoadedNavId by remember { mutableStateOf(-1) }
-
     val webView = remember {
         WebView(context).apply {
-            // Apply all settings including cookies and debugging
+            // Apply ALL settings at creation time
             WebViewConfig.apply(settings, this)
-
-            // Set background to app-like color (not white, not transparent)
-            // This prevents the jarring "white screen" flash when WebView
-            // is visible but hasn't rendered content yet
-            setBackgroundColor(Color.parseColor("#FAFAFA"))
-
-            // Keep WebView focusable for video interaction
-            isFocusable = true
-            isFocusableInTouchMode = true
 
             webViewClient = object : WebViewClient() {
 
@@ -78,16 +82,21 @@ fun WebViewWrapper(
                 ): Boolean {
                     val requestUrl = request?.url?.toString() ?: return false
 
-                    // Block unsupported schemes that would cause blank screen
-                    if (requestUrl.startsWith("intent://") ||
-                        requestUrl.startsWith("market://") ||
-                        requestUrl.startsWith("tel:") ||
-                        requestUrl.startsWith("mailto:")
-                    ) {
-                        Log.w("WebView", "Blocked unsupported scheme: $requestUrl")
-                        return true
+                    // Only block truly unsupported schemes
+                    // DO NOT block http/https — let WebView handle all web navigation
+                    val scheme = request?.url?.scheme ?: return false
+                    when (scheme) {
+                        "http", "https" -> return false  // Always allow web URLs
+                        "intent" -> {
+                            Log.w("WebView", "Blocked intent:// scheme: $requestUrl")
+                            return true
+                        }
+                        "market" -> {
+                            Log.w("WebView", "Blocked market:// scheme: $requestUrl")
+                            return true
+                        }
                     }
-
+                    // Let other schemes through or block as needed
                     return false
                 }
 
@@ -99,7 +108,6 @@ fun WebViewWrapper(
 
                 override fun onPageFinished(view: WebView, url: String?) {
                     url?.let {
-                        // Inject viewport override JS on every page load
                         if (currentDesktopMode) {
                             view.evaluateJavascript(WebViewConfig.DESKTOP_VIEWPORT_JS, null)
                         }
@@ -141,9 +149,9 @@ fun WebViewWrapper(
                 override fun onRenderProcessGone(
                     view: WebView, detail: android.webkit.RenderProcessGoneDetail?
                 ): Boolean {
-                    Log.e("WebView", "Render process gone for ${view.url}, crashing=${detail?.didCrash()}")
+                    Log.e("WebView", "Render process gone for ${view.url}")
                     if (view.url != null && view.url != "about:blank") {
-                        view.postDelayed({ view.reload() }, 500)
+                        view.postDelayed({ view.reload() }, 1000)
                     }
                     return true
                 }
@@ -176,10 +184,8 @@ fun WebViewWrapper(
                         val transport = resultMsg?.obj as? android.webkit.WebView.WebViewTransport
                         if (transport != null) {
                             transport.webView = newWebView
-                            resultMsg?.sendToTarget()
-                        } else {
-                            resultMsg?.sendToTarget()
                         }
+                        resultMsg?.sendToTarget()
                     } catch (e: Exception) {
                         Log.e("WebView", "onCreateWindow failed", e)
                     }
@@ -190,11 +196,9 @@ fun WebViewWrapper(
                     if (fullscreenView != null) {
                         onHideCustomView()
                     }
-
                     fullscreenView = view
                     customViewCallback = callback
                     isFullscreen = true
-
                     view?.let { v ->
                         (this@apply.parent as? ViewGroup)?.let { parent ->
                             parent.removeView(this@apply)
@@ -216,7 +220,6 @@ fun WebViewWrapper(
                             ))
                         }
                     }
-
                     fullscreenView = null
                     customViewCallback?.onCustomViewHidden()
                     customViewCallback = null
@@ -241,80 +244,56 @@ fun WebViewWrapper(
         }
     }
 
-    // Clean up WebView when composable leaves composition
+    // Clean up when leaving composition
     DisposableEffect(Unit) {
         onDispose {
             try {
                 webView.stopLoading()
                 webView.settings.javaScriptEnabled = false
+                webView.loadUrl("about:blank")
+                webView.freeMemory()
                 webView.destroy()
-            } catch (e: Exception) {
-                Log.w("WebView", "Error destroying WebView", e)
-            }
+            } catch (_: Exception) {}
         }
     }
 
-    // Apply desktop/mobile WebView settings
+    // Apply desktop/mobile mode settings
     fun applyDesktopMode(wv: WebView, desktopMode: Boolean) {
         currentDesktopMode = desktopMode
         wv.settings.userAgentString = if (desktopMode) {
             WebViewConfig.DESKTOP_USER_AGENT
         } else {
-            WebSettings.getDefaultUserAgent(context)
+            WebViewConfig.MOBILE_USER_AGENT
         }
         wv.settings.useWideViewPort = true
         wv.settings.loadWithOverviewMode = false
-
-        if (desktopMode) {
-            wv.setInitialScale(100)
-        } else {
-            wv.setInitialScale(0)
-        }
+        wv.setInitialScale(if (desktopMode) 100 else 0)
     }
 
     // Apply incognito settings
     LaunchedEffect(isIncognito) {
-        if (isIncognito) {
-            webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        webView.settings.cacheMode = if (isIncognito) {
+            WebSettings.LOAD_NO_CACHE
         } else {
-            webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+            WebSettings.LOAD_DEFAULT
         }
     }
 
-    // Load URL when navigationId changes — with safety checks and retry
+    // Load URL when user navigates (navigationId changes)
     LaunchedEffect(navigationId) {
         if (url.isNotEmpty() && navigationId != lastLoadedNavId) {
             lastLoadedNavId = navigationId
             try {
                 applyDesktopMode(webView, isDesktopMode)
-
-                // CRITICAL: Make sure WebView is attached before loading.
-                // If WebView has no parent, it's not in the layout tree yet.
-                // Post the loadUrl to the next frame to ensure attachment.
-                if (webView.parent != null) {
-                    webView.loadUrl(url)
-                } else {
-                    // WebView not yet attached — post to next frame
-                    webView.post { webView.loadUrl(url) }
-                }
-
-                Log.d("WebView", "Loading URL: $url (navId=$navigationId)")
+                webView.loadUrl(url)
+                Log.d("WebView", "Loading: $url")
             } catch (e: Exception) {
-                Log.e("WebView", "Failed to load URL: $url", e)
-                // Retry after a short delay
-                try {
-                    delay(500)
-                    webView.loadUrl(url)
-                    Log.d("WebView", "Retry loading URL: $url")
-                } catch (e2: Exception) {
-                    Log.e("WebView", "Retry also failed for URL: $url", e2)
-                    onReceivedError("Failed to load page: ${e2.message}")
-                }
+                Log.e("WebView", "loadUrl failed: $url", e)
             }
         }
     }
 
-    // When desktop mode is toggled while a page is already loaded, reload
+    // Reload when desktop mode is toggled while a page is loaded
     LaunchedEffect(isDesktopMode) {
         val wvUrl = webView.url
         if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
@@ -323,40 +302,14 @@ fun WebViewWrapper(
         }
     }
 
-    // Fallback timeout: if page hasn't started loading after 15 seconds, retry once
-    LaunchedEffect(navigationId) {
-        if (url.isNotEmpty() && navigationId > 0) {
-            delay(15_000)
-            // If WebView is still showing about:blank or the URL doesn't match
-            val currentWvUrl = webView.url
-            if (currentWvUrl == null || currentWvUrl == "about:blank" || currentWvUrl.isEmpty()) {
-                Log.w("WebView", "Page load timeout, retrying: $url")
-                try {
-                    webView.loadUrl(url)
-                } catch (e: Exception) {
-                    Log.e("WebView", "Timeout retry failed", e)
-                }
-            }
-        }
-    }
-
-    // SIMPLIFIED VISIBILITY LOGIC:
-    // - WebView is ALWAYS VISIBLE when the start page is not showing and there's no error.
-    // - The StartPage and ErrorPage overlays are drawn ON TOP of the WebView.
-    // - No more `hasPageStartedLoading` flag that was causing persistent white screens
-    //   when onPageStarted didn't fire for about:blank on some devices.
+    // THE KEY CHANGE: WebView is ALWAYS VISIBLE. No visibility tricks.
+    // StartPage and ErrorPage are opaque Compose overlays drawn on top.
+    // This eliminates ALL the state-sync bugs that caused white screens.
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { webView },
-            modifier = Modifier.fillMaxSize(),
-            update = { wv ->
-                // Simple visibility: show WebView when not on start page and no error
-                val shouldShow = !showStartPage && !hasError
-                val targetVisibility = if (shouldShow) View.VISIBLE else View.GONE
-                if (wv.visibility != targetVisibility) {
-                    wv.visibility = targetVisibility
-                }
-            }
+            modifier = Modifier.fillMaxSize()
+            // NO update block needed — we never change WebView visibility
         )
     }
 }

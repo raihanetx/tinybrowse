@@ -2,13 +2,14 @@ package com.tinybrowse.ui.browser
 
 import android.webkit.CookieManager
 import android.webkit.WebView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -31,10 +32,6 @@ fun BrowserScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
-
-    // NOTE: Do NOT destroy the WebView here. WebViewWrapper handles its own
-    // lifecycle with a DisposableEffect. Destroying here would conflict and
-    // cause the WebView to be destroyed while still in use.
 
     Column(modifier = modifier.fillMaxSize()) {
         // Tab bar (only show if more than 1 tab)
@@ -76,7 +73,6 @@ fun BrowserScreen(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false }
             ) {
-                // Save site
                 DropdownMenuItem(
                     text = { Text(if (state.isCurrentSiteSaved) "✓ Saved" else "Save this page") },
                     onClick = {
@@ -86,7 +82,6 @@ fun BrowserScreen(
                     enabled = !state.showStartPage && !state.isCurrentSiteSaved
                 )
 
-                // Desktop mode toggle
                 DropdownMenuItem(
                     text = {
                         Text(if (state.isDesktopMode) "✓ Desktop mode" else "Desktop mode")
@@ -97,7 +92,6 @@ fun BrowserScreen(
                     }
                 )
 
-                // New tab
                 DropdownMenuItem(
                     text = { Text("New tab") },
                     onClick = {
@@ -106,7 +100,6 @@ fun BrowserScreen(
                     }
                 )
 
-                // New incognito tab
                 DropdownMenuItem(
                     text = { Text("New incognito tab") },
                     onClick = {
@@ -115,11 +108,8 @@ fun BrowserScreen(
                     }
                 )
 
-                // Home — DO NOT load about:blank! Just show the start page overlay.
-                // Loading about:blank causes a white screen flash when the user
-                // navigates again, because the WebView shows about:blank before
-                // the new URL loads. Keeping the previous page in the WebView
-                // means the user sees the last page (not white) during navigation.
+                // Home — just show the start page overlay.
+                // Do NOT load about:blank — it causes white screen on next navigation.
                 DropdownMenuItem(
                     text = { Text("Home") },
                     onClick = {
@@ -130,11 +120,12 @@ fun BrowserScreen(
             }
         }
 
-        // Content area
-        // WebViewWrapper must ALWAYS stay in the composition tree.
-        // StartPage and ErrorPage are drawn as overlays on top.
+        // === CONTENT AREA ===
+        // The WebView is ALWAYS in the composition tree and ALWAYS VISIBLE.
+        // StartPage and ErrorPage are OPAQUE overlays drawn on top.
+        // We NEVER change the WebView's visibility — this is the key fix.
         Box(modifier = Modifier.weight(1f)) {
-            // WebView is ALWAYS in the composition — never recreated
+            // WebView — always composed, always visible
             WebViewWrapper(
                 url = state.currentUrl,
                 navigationId = state.navigationId,
@@ -157,17 +148,20 @@ fun BrowserScreen(
                 webViewRef = { webView = it }
             )
 
-            // Overlay start page on top of WebView (WebView stays alive underneath)
+            // Start page — opaque overlay that FULLY covers the WebView
             if (state.showStartPage) {
                 StartPage(
                     savedSites = state.savedSites,
                     onSearch = { viewModel.search(it) },
                     onSiteClick = { viewModel.loadUrl(it.url) },
-                    onSiteLongClick = { viewModel.deleteSavedSite(it.id) }
+                    onSiteLongClick = { viewModel.deleteSavedSite(it.id) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
                 )
             }
 
-            // Overlay error page on top of WebView
+            // Error page — opaque overlay that FULLY covers the WebView
             if (!state.showStartPage && state.error != null) {
                 ErrorPage(
                     errorMessage = state.error ?: "",
