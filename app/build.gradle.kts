@@ -12,8 +12,8 @@ android {
         applicationId = "com.tinybrowse"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.0.9"
+        versionCode = 10
+        versionName = "1.1.0"
     }
 
     // Debug signing config — used by release builds in CI so the APK

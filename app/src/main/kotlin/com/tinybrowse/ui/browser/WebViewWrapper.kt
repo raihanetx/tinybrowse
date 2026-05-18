@@ -5,6 +5,7 @@ import android.net.http.SslError
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -28,13 +29,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
 
 /**
- * WebViewWrapper — v1.0.8
+ * WebViewWrapper — v1.0.9
  *
  * Architecture:
  * - WebView is ALWAYS VISIBLE. No visibility hacks.
  * - StartPage and ErrorPage are opaque Compose overlays drawn ON TOP.
  * - Uses Chrome Mobile User-Agent (NOT default WebView UA which contains "wv")
  *   so websites don't serve blank/degraded pages.
+ * - Desktop mode: uses loadWithOverviewMode=true + setInitialScale(0) to
+ *   auto-fit desktop content. NEVER use setInitialScale(100) — it renders
+ *   desktop content off-screen on phone-sized viewports = BLANK WHITE PAGE.
  */
 @Composable
 fun WebViewWrapper(
@@ -175,8 +179,18 @@ fun WebViewWrapper(
                 ): Boolean {
                     try {
                         val newWebView = WebView(view.context)
+                        // Apply the same UA as the parent WebView so popup
+                        // windows don't get the default "wv" UA which causes
+                        // websites to serve blank/degraded pages.
+                        newWebView.settings.userAgentString = view.settings.userAgentString
                         newWebView.settings.javaScriptEnabled = true
                         newWebView.settings.domStorageEnabled = true
+                        newWebView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        // Accept third-party cookies for the popup so
+                        // authentication/login flows work correctly.
+                        try {
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(newWebView, true)
+                        } catch (_: Exception) {}
                         newWebView.webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
                                 v: WebView, request: WebResourceRequest?
@@ -270,8 +284,17 @@ fun WebViewWrapper(
             WebViewConfig.MOBILE_USER_AGENT
         }
         wv.settings.useWideViewPort = true
-        wv.settings.loadWithOverviewMode = false
-        wv.setInitialScale(if (desktopMode) 100 else 0)
+        // Desktop mode: loadWithOverviewMode=true auto-fits the wider desktop
+        // content to the phone screen width. Without this, the desktop layout
+        // renders at full width (1024px+) and most content goes off-screen.
+        // Mobile mode: loadWithOverviewMode=false respects the page's own
+        // viewport meta tag (usually width=device-width) for correct mobile layout.
+        wv.settings.loadWithOverviewMode = desktopMode
+        // CRITICAL: Always use setInitialScale(0) (auto-calculate).
+        // setInitialScale(100) forces 100% zoom = 1 CSS pixel per physical pixel.
+        // On a ~360dp phone with a 1024px desktop viewport, this renders everything
+        // off-screen = BLANK WHITE PAGE. setInitialScale(0) lets WebView auto-fit.
+        wv.setInitialScale(0)
     }
 
     // Apply incognito settings
@@ -305,7 +328,16 @@ fun WebViewWrapper(
             val wvUrl = webView.url
             if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
                 applyDesktopMode(webView, isDesktopMode)
-                webView.reload()
+                // Use loadUrl() instead of reload() to force a FRESH page load.
+                // reload() may serve cached resources (CSS/JS/images) that were
+                // fetched with the old UA (mobile), which can be DIFFERENT from
+                // what the desktop version expects. loadUrl() ensures the server
+                // re-evaluates the request with the new desktop UA.
+                try {
+                    webView.loadUrl(wvUrl)
+                } catch (e: Exception) {
+                    Log.e("WebView", "loadUrl failed on desktop mode toggle: $wvUrl", e)
+                }
             }
         }
     }
