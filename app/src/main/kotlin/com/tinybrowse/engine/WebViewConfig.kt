@@ -35,7 +35,6 @@ object WebViewConfig {
         settings.apply {
             // === PERFORMANCE ===
             cacheMode = WebSettings.LOAD_DEFAULT
-            setRenderPriority(WebSettings.RenderPriority.HIGH)
 
             // === JAVASCRIPT — required for ALL modern websites ===
             javaScriptEnabled = true
@@ -79,9 +78,6 @@ object WebViewConfig {
             // === FILE ACCESS ===
             allowFileAccess = true
             allowContentAccess = true
-
-            // === FORM DATA ===
-            saveFormData = true
         }
 
         // === COOKIES — must accept all cookies for sites to function ===

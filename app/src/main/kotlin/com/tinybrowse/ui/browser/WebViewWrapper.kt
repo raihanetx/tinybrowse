@@ -85,6 +85,13 @@ fun WebViewWrapper(
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                    // CRITICAL: Ignore about:blank — the WebView fires this
+                    // on initial creation. If we pass it to onPageStarted(),
+                    // the ViewModel sets showStartPage=false and currentUrl
+                    // to "about:blank", which removes the StartPage overlay
+                    // and shows the WebView's blank content = WHITE SCREEN.
+                    if (url == "about:blank") return
+
                     // Reset secure state on each new page load
                     onSslStateChanged(true)
                     url?.let { onPageStarted(it) }
@@ -108,8 +115,22 @@ fun WebViewWrapper(
                     error: WebResourceError?
                 ) {
                     super.onReceivedError(view, request, error)
-                    if (request?.isForMainFrame == true) {
-                        onReceivedError(error?.description?.toString() ?: "Page failed to load")
+                    // Only show error for main frame AND only if the page
+                    // hasn't already started loading something else. Some
+                    // errors are temporary network glitches that resolve
+                    // on their own — don't show error page for those.
+                    if (request?.isForMainFrame == true && view.url != null && view.url != "about:blank") {
+                        // Check if the error is actually preventing page load.
+                        // If progress is already > 50%, the page loaded partially
+                        // and the error is likely a subresource failure — not a blank screen.
+                        val errorCode = error?.errorCode ?: -1
+                        if (errorCode == WebViewClient.ERROR_HOST_LOOKUP ||
+                            errorCode == WebViewClient.ERROR_CONNECT ||
+                            errorCode == WebViewClient.ERROR_TIMEOUT ||
+                            errorCode == WebViewClient.ERROR_TOO_MANY_REQUESTS
+                        ) {
+                            onReceivedError(error?.description?.toString() ?: "Page failed to load")
+                        }
                     }
                 }
 
@@ -276,12 +297,16 @@ fun WebViewWrapper(
         }
     }
 
-    // Reload when desktop mode is toggled while a page is loaded
+    // Reload when desktop mode is toggled while a page is loaded.
+    // Skip on first composition (currentDesktopMode == isDesktopMode).
     LaunchedEffect(isDesktopMode) {
-        val wvUrl = webView.url
-        if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
-            applyDesktopMode(webView, isDesktopMode)
-            webView.reload()
+        // Only reload if the mode actually changed from a previous state
+        if (currentDesktopMode != isDesktopMode) {
+            val wvUrl = webView.url
+            if (wvUrl != null && wvUrl != "about:blank" && wvUrl.isNotEmpty()) {
+                applyDesktopMode(webView, isDesktopMode)
+                webView.reload()
+            }
         }
     }
 

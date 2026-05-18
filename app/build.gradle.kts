@@ -12,14 +12,30 @@ android {
         applicationId = "com.tinybrowse"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.0.8"
+        versionCode = 9
+        versionName = "1.0.9"
+    }
+
+    // Debug signing config — used by release builds in CI so the APK
+    // can be installed on devices. A proper release keystore should be
+    // added later for Play Store distribution.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // Sign with debug key so the APK can be installed on devices.
+            // For Play Store: create a release keystore and store credentials
+            // in GitHub Secrets instead.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -182,16 +182,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (index < 0 || index >= state.tabs.size) return
 
         val tab = state.tabs[index]
+        val isStart = tab.url == "start"
         _state.update {
             it.copy(
                 activeTabIndex = index,
-                currentUrl = if (tab.url == "start") "" else tab.url,
+                currentUrl = if (isStart) "" else tab.url,
                 currentTitle = tab.title,
-                showStartPage = tab.url == "start",
+                showStartPage = isStart,
                 isLoading = false,
                 pageProgress = 0,
                 error = null,
-                navigationId = it.navigationId + 1  // Signal WebView to load tab URL
+                // Only signal WebView to load if the tab has a real URL.
+                // Don't increment for start pages — no need to loadUrl("").
+                navigationId = if (isStart) it.navigationId else it.navigationId + 1
             )
         }
     }
@@ -219,16 +222,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.coerceIn(0, newTabs.size - 1)
 
         val activeTab = newTabs[newActiveIndex]
+        val isStart = activeTab.url == "start"
         _state.update {
             it.copy(
                 tabs = newTabs,
                 activeTabIndex = newActiveIndex,
-                currentUrl = if (activeTab.url == "start") "" else activeTab.url,
+                currentUrl = if (isStart) "" else activeTab.url,
                 currentTitle = activeTab.title,
-                showStartPage = activeTab.url == "start",
+                showStartPage = isStart,
                 isLoading = false,
                 error = null,
-                navigationId = it.navigationId + 1  // Signal WebView to load
+                // Only signal WebView to load if the tab has a real URL.
+                navigationId = if (isStart) it.navigationId else it.navigationId + 1
             )
         }
     }
@@ -279,13 +284,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val isSaved = savedSiteDao.isSaved(url)
             _state.update { it.copy(isCurrentSiteSaved = isSaved) }
         }
-    }
-
-    // --- Incognito ---
-
-    fun clearIncognitoData() {
-        // Called when incognito tab is closed
-        // WebView cookie/cache clearing handled in UI layer
     }
 
     // --- Start Page ---
