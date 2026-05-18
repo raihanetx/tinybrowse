@@ -18,6 +18,7 @@ class BrowseDatabase(context: Context) : SQLiteOpenHelper(
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(SQL_CREATE_SAVED_SITES)
+        db.execSQL(SQL_CREATE_INDEX_URL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -33,4 +34,8 @@ private const val SQL_CREATE_SAVED_SITES = """
         favicon BLOB,
         created_at INTEGER NOT NULL
     )
+"""
+
+private const val SQL_CREATE_INDEX_URL = """
+    CREATE INDEX idx_saved_sites_url ON saved_sites(url)
 """

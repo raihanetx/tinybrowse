@@ -20,7 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.tinybrowse.ui.error.ErrorPage
-import com.tinyrowse.ui.main.MainViewModel
+import com.tinybrowse.ui.main.MainViewModel
 import com.tinybrowse.ui.start.StartPage
 
 @Composable

@@ -5,19 +5,16 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
 
@@ -78,10 +75,6 @@ fun WebViewWrapper(
                 override fun onProgressChanged(view: WebView, newProgress: Int) {
                     onProgressChanged(newProgress)
                 }
-
-                override fun onReceivedTitle(view: WebView, title: String?) {
-                    title?.let { onPageFinished(view.url ?: "", it) }
-                }
             }
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
@@ -89,6 +82,33 @@ fun WebViewWrapper(
             }
 
             webViewRef(this)
+        }
+    }
+
+    // Load URL reactively when url state changes
+    LaunchedEffect(url) {
+        if (url.isNotEmpty()) {
+            webView.loadUrl(url)
+        }
+    }
+
+    // Apply desktop mode reactively
+    LaunchedEffect(isDesktopMode) {
+        webView.settings.userAgentString = if (isDesktopMode) {
+            "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0"
+        } else {
+            WebSettings.getDefaultUserAgent(context)
+        }
+        webView.settings.useWideViewPort = isDesktopMode
+    }
+
+    // Apply incognito settings
+    LaunchedEffect(isIncognito) {
+        if (isIncognito) {
+            webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            webView.settings.databaseEnabled = false
+        } else {
+            webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
         }
     }
 
