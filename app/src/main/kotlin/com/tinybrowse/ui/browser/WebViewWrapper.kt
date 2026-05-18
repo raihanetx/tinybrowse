@@ -33,7 +33,8 @@ fun WebViewWrapper(
     navigationId: Int,
     isDesktopMode: Boolean,
     isIncognito: Boolean,
-    isVisible: Boolean,
+    showStartPage: Boolean,
+    hasError: Boolean,
     onPageStarted: (String) -> Unit,
     onPageFinished: (String, String) -> Unit,
     onProgressChanged: (Int) -> Unit,
@@ -51,35 +52,39 @@ fun WebViewWrapper(
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
+    // CRITICAL FIX: Track whether a page has actually started loading.
+    // We keep the WebView INVISIBLE until onPageStarted fires for the
+    // first time. This prevents the white about:blank page from being
+    // visible during the gap between navigating away from the start page
+    // and the URL actually starting to load in the WebView.
+    var hasPageStartedLoading by remember { mutableStateOf(false) }
+
     val webView = remember {
         WebView(context).apply {
             // Apply all settings including cookies and debugging
             WebViewConfig.apply(settings, this)
 
-            // CRITICAL FIX: Set background color to match dark theme / reduce
-            // white flash. Default white background is very jarring and makes
-            // it look like the page is "blank" before content renders.
+            // CRITICAL FIX: Set background to transparent to reduce white flash.
+            // The default white background is very jarring and makes it look
+            // like the page is "blank" before content renders.
             setBackgroundColor(Color.TRANSPARENT)
 
             // Keep WebView focusable for video interaction
             isFocusable = true
             isFocusableInTouchMode = true
 
-            // Initial visibility — hidden when start page is showing
-            visibility = if (isVisible) View.VISIBLE else View.INVISIBLE
+            // Start INVISIBLE — we only make it visible after a page
+            // starts loading, to prevent the white about:blank flash
+            visibility = View.INVISIBLE
 
             webViewClient = object : WebViewClient() {
 
                 override fun shouldOverrideUrlLoading(
                     view: WebView, request: WebResourceRequest?
                 ): Boolean {
-                    // Return false = let WebView handle the URL itself.
-                    // This is critical — without this override, some Android
-                    // versions may try to launch an external browser.
                     val requestUrl = request?.url?.toString() ?: return false
 
                     // Block unsupported schemes that would cause blank screen
-                    // (e.g. intent://, market://, tel://, mailto://)
                     if (requestUrl.startsWith("intent://") ||
                         requestUrl.startsWith("market://") ||
                         requestUrl.startsWith("tel:") ||
@@ -93,6 +98,10 @@ fun WebViewWrapper(
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                    // CRITICAL: Mark that a page has started loading.
+                    // This triggers the WebView to become visible.
+                    hasPageStartedLoading = true
+
                     url?.let { onPageStarted(it) }
                     onCanGoBackChanged(view.canGoBack())
                     onCanGoForwardChanged(view.canGoForward())
@@ -134,23 +143,16 @@ fun WebViewWrapper(
                     view: WebView, handler: SslErrorHandler,
                     error: SslError?
                 ) {
-                    // CRITICAL FIX: handler.cancel() was KILLING page loads
-                    // for any site with minor SSL issues, causing white screen.
-                    // Most browsers proceed with a warning instead.
                     Log.w("WebView", "SSL error for ${view.url}: ${error?.toString()}")
                     onSslStateChanged(false)
-                    handler.proceed()  // Allow the page to load
+                    handler.proceed()
                 }
 
                 override fun onRenderProcessGone(
                     view: WebView, detail: android.webkit.RenderProcessGoneDetail?
                 ): Boolean {
-                    // CRITICAL FIX: When the WebView renderer process crashes
-                    // (OOM, GPU error, etc.), the page becomes permanently blank.
-                    // Return true to indicate we handled it, and reload the page.
                     Log.e("WebView", "Render process gone for ${view.url}, crashing=${detail?.didCrash()}")
                     if (view.url != null && view.url != "about:blank") {
-                        // Post a reload to give the system time to recover
                         view.postDelayed({ view.reload() }, 500)
                     }
                     return true
@@ -162,10 +164,6 @@ fun WebViewWrapper(
                     onProgressChanged(newProgress)
                 }
 
-                // CRITICAL FIX: Sites like YouTube open new windows for content.
-                // Without this, window.open() silently fails = blank screen.
-                // We create a temporary WebView to intercept the URL,
-                // then load it in the main WebView instead.
                 override fun onCreateWindow(
                     view: WebView, isDialog: Boolean, isUserGesture: Boolean,
                     resultMsg: android.os.Message?
@@ -190,7 +188,6 @@ fun WebViewWrapper(
                             transport.webView = newWebView
                             resultMsg?.sendToTarget()
                         } else {
-                            // Fallback: just notify the message
                             resultMsg?.sendToTarget()
                         }
                     } catch (e: Exception) {
@@ -237,8 +234,6 @@ fun WebViewWrapper(
                 }
 
                 override fun getDefaultVideoPoster(): Bitmap? {
-                    // Return a transparent 1px bitmap instead of null
-                    // to prevent video placeholder rendering issues
                     return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
                 }
 
@@ -247,14 +242,6 @@ fun WebViewWrapper(
                     return true
                 }
             }
-
-            // CRITICAL FIX: Handle WebView renderer process death.
-            // On low-memory devices or heavy sites, the OS can kill the
-            // WebView renderer process. Without this handler, the page
-            // becomes permanently blank (white screen) with no recovery.
-            // We use onRenderProcessGone in WebViewClient (API 26+) instead
-            // of WebViewRenderProcessClient which has API compatibility issues.
-            // The handler is set in the WebViewClient below.
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
                 onDownloadStart(url, userAgent, contentDisposition, mimeType, contentLength)
@@ -291,12 +278,7 @@ fun WebViewWrapper(
         }
     }
 
-    // === KEY FIX: Only load URL when navigationId changes ===
-    // navigationId is incremented ONLY by user-initiated actions
-    // (typing URL, switching tabs, closing tabs).
-    // Internal WebView navigation (redirects, link clicks) updates
-    // currentUrl but does NOT increment navigationId, so this
-    // LaunchedEffect won't fire and won't cancel the in-progress load.
+    // Load URL when navigationId changes
     LaunchedEffect(navigationId) {
         if (url.isNotEmpty()) {
             applyDesktopMode(webView, isDesktopMode)
@@ -318,12 +300,19 @@ fun WebViewWrapper(
             factory = { webView },
             modifier = Modifier.fillMaxSize(),
             update = { wv ->
-                // CRITICAL FIX: Control WebView visibility based on whether
-                // the start page is showing. When start page is visible,
-                // hide the WebView to prevent white background from showing
-                // through the overlay. When navigating, make it visible
-                // so the page content is displayed.
-                val targetVisibility = if (isVisible) View.VISIBLE else View.INVISIBLE
+                // CRITICAL FIX: WebView visibility logic.
+                // We keep the WebView INVISIBLE in these cases:
+                // 1. When the start page is showing (no page loaded yet)
+                // 2. When an error page is showing
+                // 3. When a URL has been requested but onPageStarted hasn't
+                //    fired yet (prevents white about:blank flash)
+                //
+                // The WebView becomes VISIBLE only when:
+                // - The start page is NOT showing
+                // - There's no error overlay
+                // - onPageStarted has fired (page is actually loading)
+                val shouldShowWebView = !showStartPage && !hasError && hasPageStartedLoading
+                val targetVisibility = if (shouldShowWebView) View.VISIBLE else View.INVISIBLE
                 if (wv.visibility != targetVisibility) {
                     wv.visibility = targetVisibility
                 }
