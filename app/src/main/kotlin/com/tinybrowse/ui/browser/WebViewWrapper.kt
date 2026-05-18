@@ -242,24 +242,29 @@ fun WebViewWrapper(
             // WebView renderer process. Without this handler, the page
             // becomes permanently blank (white screen) with no recovery.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                setWebViewRenderProcessClient(
-                    object : WebViewRenderProcessClient() {
-                        override fun onRenderProcessUnresponsive(
-                            view: WebView?,
-                            renderer: WebViewRenderProcess?
-                        ) {
-                            Log.w("WebView", "Renderer unresponsive for ${view?.url}")
-                            // Don't kill it — it might recover
-                        }
+                try {
+                    setWebViewRenderProcessClient(
+                        java.util.concurrent.Executors.newSingleThreadExecutor(),
+                        object : WebViewRenderProcessClient() {
+                            override fun onRenderProcessUnresponsive(
+                                view: WebView,
+                                renderer: WebViewRenderProcess
+                            ) {
+                                Log.w("WebView", "Renderer unresponsive for ${view.url}")
+                                // Don't kill it — it might recover
+                            }
 
-                        override fun onRenderProcessResponsive(
-                            view: WebView?,
-                            renderer: WebViewRenderProcess?
-                        ) {
-                            // Recovered — no action needed
+                            override fun onRenderProcessResponsive(
+                                view: WebView,
+                                renderer: WebViewRenderProcess
+                            ) {
+                                // Recovered — no action needed
+                            }
                         }
-                    }
-                )
+                    )
+                } catch (e: Exception) {
+                    Log.w("WebView", "Failed to set render process client", e)
+                }
             }
 
             setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
