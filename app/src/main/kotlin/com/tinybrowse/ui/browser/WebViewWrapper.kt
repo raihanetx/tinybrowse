@@ -17,6 +17,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tinybrowse.engine.WebViewConfig
+import kotlinx.coroutines.delay
 
 @Composable
 fun WebViewWrapper(
@@ -52,30 +54,22 @@ fun WebViewWrapper(
     var fullscreenView by remember { mutableStateOf<View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
-    // CRITICAL FIX: Track whether a page has actually started loading.
-    // We keep the WebView INVISIBLE until onPageStarted fires for the
-    // first time. This prevents the white about:blank page from being
-    // visible during the gap between navigating away from the start page
-    // and the URL actually starting to load in the WebView.
-    var hasPageStartedLoading by remember { mutableStateOf(false) }
+    // Track last loaded navigationId to avoid duplicate loads
+    var lastLoadedNavId by remember { mutableStateOf(-1) }
 
     val webView = remember {
         WebView(context).apply {
             // Apply all settings including cookies and debugging
             WebViewConfig.apply(settings, this)
 
-            // CRITICAL FIX: Set background to transparent to reduce white flash.
-            // The default white background is very jarring and makes it look
-            // like the page is "blank" before content renders.
-            setBackgroundColor(Color.TRANSPARENT)
+            // Set background to app-like color (not white, not transparent)
+            // This prevents the jarring "white screen" flash when WebView
+            // is visible but hasn't rendered content yet
+            setBackgroundColor(Color.parseColor("#FAFAFA"))
 
             // Keep WebView focusable for video interaction
             isFocusable = true
             isFocusableInTouchMode = true
-
-            // Start INVISIBLE — we only make it visible after a page
-            // starts loading, to prevent the white about:blank flash
-            visibility = View.INVISIBLE
 
             webViewClient = object : WebViewClient() {
 
@@ -98,10 +92,6 @@ fun WebViewWrapper(
                 }
 
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                    // CRITICAL: Mark that a page has started loading.
-                    // This triggers the WebView to become visible.
-                    hasPageStartedLoading = true
-
                     url?.let { onPageStarted(it) }
                     onCanGoBackChanged(view.canGoBack())
                     onCanGoForwardChanged(view.canGoForward())
@@ -251,6 +241,19 @@ fun WebViewWrapper(
         }
     }
 
+    // Clean up WebView when composable leaves composition
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                webView.stopLoading()
+                webView.settings.javaScriptEnabled = false
+                webView.destroy()
+            } catch (e: Exception) {
+                Log.w("WebView", "Error destroying WebView", e)
+            }
+        }
+    }
+
     // Apply desktop/mobile WebView settings
     fun applyDesktopMode(wv: WebView, desktopMode: Boolean) {
         currentDesktopMode = desktopMode
@@ -278,11 +281,36 @@ fun WebViewWrapper(
         }
     }
 
-    // Load URL when navigationId changes
+    // Load URL when navigationId changes — with safety checks and retry
     LaunchedEffect(navigationId) {
-        if (url.isNotEmpty()) {
-            applyDesktopMode(webView, isDesktopMode)
-            webView.loadUrl(url)
+        if (url.isNotEmpty() && navigationId != lastLoadedNavId) {
+            lastLoadedNavId = navigationId
+            try {
+                applyDesktopMode(webView, isDesktopMode)
+
+                // CRITICAL: Make sure WebView is attached before loading.
+                // If WebView has no parent, it's not in the layout tree yet.
+                // Post the loadUrl to the next frame to ensure attachment.
+                if (webView.parent != null) {
+                    webView.loadUrl(url)
+                } else {
+                    // WebView not yet attached — post to next frame
+                    webView.post { webView.loadUrl(url) }
+                }
+
+                Log.d("WebView", "Loading URL: $url (navId=$navigationId)")
+            } catch (e: Exception) {
+                Log.e("WebView", "Failed to load URL: $url", e)
+                // Retry after a short delay
+                try {
+                    delay(500)
+                    webView.loadUrl(url)
+                    Log.d("WebView", "Retry loading URL: $url")
+                } catch (e2: Exception) {
+                    Log.e("WebView", "Retry also failed for URL: $url", e2)
+                    onReceivedError("Failed to load page: ${e2.message}")
+                }
+            }
         }
     }
 
@@ -295,24 +323,36 @@ fun WebViewWrapper(
         }
     }
 
+    // Fallback timeout: if page hasn't started loading after 15 seconds, retry once
+    LaunchedEffect(navigationId) {
+        if (url.isNotEmpty() && navigationId > 0) {
+            delay(15_000)
+            // If WebView is still showing about:blank or the URL doesn't match
+            val currentWvUrl = webView.url
+            if (currentWvUrl == null || currentWvUrl == "about:blank" || currentWvUrl.isEmpty()) {
+                Log.w("WebView", "Page load timeout, retrying: $url")
+                try {
+                    webView.loadUrl(url)
+                } catch (e: Exception) {
+                    Log.e("WebView", "Timeout retry failed", e)
+                }
+            }
+        }
+    }
+
+    // SIMPLIFIED VISIBILITY LOGIC:
+    // - WebView is ALWAYS VISIBLE when the start page is not showing and there's no error.
+    // - The StartPage and ErrorPage overlays are drawn ON TOP of the WebView.
+    // - No more `hasPageStartedLoading` flag that was causing persistent white screens
+    //   when onPageStarted didn't fire for about:blank on some devices.
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { webView },
             modifier = Modifier.fillMaxSize(),
             update = { wv ->
-                // CRITICAL FIX: WebView visibility logic.
-                // We keep the WebView INVISIBLE in these cases:
-                // 1. When the start page is showing (no page loaded yet)
-                // 2. When an error page is showing
-                // 3. When a URL has been requested but onPageStarted hasn't
-                //    fired yet (prevents white about:blank flash)
-                //
-                // The WebView becomes VISIBLE only when:
-                // - The start page is NOT showing
-                // - There's no error overlay
-                // - onPageStarted has fired (page is actually loading)
-                val shouldShowWebView = !showStartPage && !hasError && hasPageStartedLoading
-                val targetVisibility = if (shouldShowWebView) View.VISIBLE else View.INVISIBLE
+                // Simple visibility: show WebView when not on start page and no error
+                val shouldShow = !showStartPage && !hasError
+                val targetVisibility = if (shouldShow) View.VISIBLE else View.GONE
                 if (wv.visibility != targetVisibility) {
                     wv.visibility = targetVisibility
                 }

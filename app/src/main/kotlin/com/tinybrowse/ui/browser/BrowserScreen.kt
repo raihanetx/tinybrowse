@@ -11,7 +11,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,12 +32,9 @@ fun BrowserScreen(
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Cleanup on dispose
-    DisposableEffect(Unit) {
-        onDispose {
-            webView?.destroy()
-        }
-    }
+    // NOTE: Do NOT destroy the WebView here. WebViewWrapper handles its own
+    // lifecycle with a DisposableEffect. Destroying here would conflict and
+    // cause the WebView to be destroyed while still in use.
 
     Column(modifier = modifier.fillMaxSize()) {
         // Tab bar (only show if more than 1 tab)
@@ -96,8 +92,6 @@ fun BrowserScreen(
                         Text(if (state.isDesktopMode) "✓ Desktop mode" else "Desktop mode")
                     },
                     onClick = {
-                        // Just toggle the ViewModel state — WebViewWrapper's
-                        // LaunchedEffect(isDesktopMode) will apply settings + reload
                         viewModel.toggleDesktopMode()
                         showMenu = false
                     }
@@ -121,12 +115,15 @@ fun BrowserScreen(
                     }
                 )
 
-                // Home
+                // Home — DO NOT load about:blank! Just show the start page overlay.
+                // Loading about:blank causes a white screen flash when the user
+                // navigates again, because the WebView shows about:blank before
+                // the new URL loads. Keeping the previous page in the WebView
+                // means the user sees the last page (not white) during navigation.
                 DropdownMenuItem(
                     text = { Text("Home") },
                     onClick = {
                         viewModel.showStartPage()
-                        webView?.loadUrl("about:blank")
                         showMenu = false
                     }
                 )
@@ -134,12 +131,8 @@ fun BrowserScreen(
         }
 
         // Content area
-        // CRITICAL FIX: WebViewWrapper must ALWAYS stay in the composition tree.
-        // Previously, it was inside a `when` block and would leave the composition
-        // when showStartPage=true or error!=null, which DESTROYED the WebView.
-        // When WebViewWrapper re-entered composition, a NEW WebView was created,
-        // showing a blank white screen because it had no loaded page.
-        // Now we keep WebViewWrapper always composed, and overlay start/error pages.
+        // WebViewWrapper must ALWAYS stay in the composition tree.
+        // StartPage and ErrorPage are drawn as overlays on top.
         Box(modifier = Modifier.weight(1f)) {
             // WebView is ALWAYS in the composition — never recreated
             WebViewWrapper(
