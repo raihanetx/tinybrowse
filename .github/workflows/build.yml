@@ -30,15 +30,14 @@ jobs:
           chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace 2>&1 || true
+        run: ./gradlew assembleDebug
 
-      - name: Show Build Logs on Failure
-        if: failure()
-        run: cat app/build/outputs/logs/*.log 2>/dev/null || echo "No logs found"
+      - name: Find APK
+        run: find . -name "*.apk" -type f
 
       - name: Upload Debug APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: tinybrowse-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
